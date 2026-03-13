@@ -1,0 +1,25 @@
+{
+  "name": "hub3",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "clients/ts/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @hub3/web",
+    "dev:api": "npm run dev --workspace @hub3/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "drizzle-kit": "^0.31.9",
+    "drizzle-orm": "^0.44.7"
+  }
+}

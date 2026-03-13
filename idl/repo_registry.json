@@ -1,0 +1,268 @@
+{
+  "address": "8d7FrUUG4sKQRsKpUDTimKb4c2MQqWVfkPFhM79CY6Ge",
+  "metadata": {
+    "name": "repo_registry",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "create_repo",
+      "discriminator": [
+        194,
+        89,
+        87,
+        186,
+        227,
+        175,
+        105,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "repo_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  112,
+                  111
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "repo_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "repo_id",
+          "type": "string"
+        },
+        {
+          "name": "source_repo_full_name",
+          "type": "string"
+        },
+        {
+          "name": "current_manifest_id",
+          "type": "string"
+        },
+        {
+          "name": "latest_commit_sha",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "set_pricing",
+      "discriminator": [
+        52,
+        200,
+        157,
+        192,
+        18,
+        134,
+        57,
+        123
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "repo_record",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "pricing_mode",
+          "type": {
+            "defined": {
+              "name": "PricingMode"
+            }
+          }
+        },
+        {
+          "name": "payment_token_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "price_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_manifest",
+      "discriminator": [
+        232,
+        75,
+        222,
+        229,
+        60,
+        55,
+        168,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "repo_record",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "current_manifest_id",
+          "type": "string"
+        },
+        {
+          "name": "latest_commit_sha",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "type": {
+            "defined": {
+              "name": "RepoStatus"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "RepoRecord",
+      "discriminator": [
+        228,
+        204,
+        146,
+        109,
+        153,
+        245,
+        179,
+        179
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Only the owner may update this repository record"
+    }
+  ],
+  "types": [
+    {
+      "name": "PricingMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Free"
+          },
+          {
+            "name": "Fixed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RepoRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "repo_id",
+            "type": "string"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_repo_full_name",
+            "type": "string"
+          },
+          {
+            "name": "current_manifest_id",
+            "type": "string"
+          },
+          {
+            "name": "latest_commit_sha",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "RepoStatus"
+              }
+            }
+          },
+          {
+            "name": "pricing_mode",
+            "type": {
+              "defined": {
+                "name": "PricingMode"
+              }
+            }
+          },
+          {
+            "name": "payment_token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "price_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RepoStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Draft"
+          },
+          {
+            "name": "Published"
+          },
+          {
+            "name": "Failed"
+          }
+        ]
+      }
+    }
+  ]
+}

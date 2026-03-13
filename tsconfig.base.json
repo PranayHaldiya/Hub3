@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@hub3/shared": ["packages/shared/src/index.ts"],
+      "@hub3/shared/*": ["packages/shared/src/*"],
+      "@hub3/repo-registry-client": ["clients/ts/repo_registry/src/index.ts"]
+    }
+  }
+}
