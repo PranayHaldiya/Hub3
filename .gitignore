@@ -11,5 +11,5 @@ target/
 .anchor/
 Cargo.lock
 *.log
-hub3/
+.hub3/
 git3doc.md
