@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { deriveHub3RepoId } from '@hub3/shared';
 import type {
   Hub3Repo,
@@ -6,6 +7,7 @@ import type {
   PublishJobStatus,
   RepoManifest
 } from '@hub3/shared';
+import { config } from './config';
 import { parseJson, query, stringifyJson, withTransaction } from './db';
 
 const now = () => new Date().toISOString();
@@ -41,6 +43,61 @@ function createJsonStore<T>(table: string, keyColumn: string, valueColumn: strin
 export const repoStore = createJsonStore<Hub3Repo>('repos', 'id', 'repo_json');
 export const manifestStore = createJsonStore<RepoManifest>('manifests', 'id', 'manifest_json');
 export const publishJobStore = createJsonStore<PublishJob>('publish_jobs', 'id', 'job_json');
+export type RepoAccessGrant = {
+  grantId: string;
+  repoId: string;
+  payerWallet: string | null;
+  createdAt: string;
+  expiresAt: string;
+};
+
+async function pruneRepoAccessGrants() {
+  await query('DELETE FROM repo_access_grants WHERE expires_at <= $1', [new Date().toISOString()]);
+}
+
+export const repoAccessGrantStore = {
+  async get(repoId: string, grantId?: string) {
+    if (!grantId) {
+      return null;
+    }
+
+    await pruneRepoAccessGrants();
+    const result = await query<RepoAccessGrant>(
+      `
+        SELECT grant_id AS "grantId", repo_id AS "repoId", payer_wallet AS "payerWallet", created_at AS "createdAt", expires_at AS "expiresAt"
+        FROM repo_access_grants
+        WHERE grant_id = $1 AND repo_id = $2
+      `,
+      [grantId, repoId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+  async create(repoId: string, payerWallet: string | null) {
+    await pruneRepoAccessGrants();
+
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + (config.HUB3_REPO_ACCESS_TTL_SECONDS * 1000));
+    const grant: RepoAccessGrant = {
+      grantId: crypto.randomUUID(),
+      repoId,
+      payerWallet,
+      createdAt: createdAt.toISOString(),
+      expiresAt: expiresAt.toISOString()
+    };
+
+    await query(
+      `
+        INSERT INTO repo_access_grants (grant_id, repo_id, payer_wallet, created_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [grant.grantId, grant.repoId, grant.payerWallet, grant.createdAt, grant.expiresAt]
+    );
+
+    return grant;
+  }
+};
+
 export const repoFilesStore = {
   async get(repoId: string) {
     const result = await query<{ path: string; contents: string }>(

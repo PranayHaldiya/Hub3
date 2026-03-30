@@ -35,3 +35,11 @@ export const repoFiles = pgTable('repo_files', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.repoId, table.path] })
 }));
+
+export const repoAccessGrants = pgTable('repo_access_grants', {
+  grantId: text('grant_id').primaryKey(),
+  repoId: text('repo_id').notNull(),
+  payerWallet: text('payer_wallet'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull()
+});

@@ -1,6 +1,10 @@
 import type { RepoManifest } from '@hub3/shared';
 
-export function ManifestCard({ manifest }: { manifest: RepoManifest | null }) {
+export function ManifestCard({ manifest, locked = false }: { manifest: RepoManifest | null; locked?: boolean }) {
+  if (locked) {
+    return <section className="card rounded-[28px] p-6">Manifest is behind x402 payment enforcement. Pay or authenticate with repository write access to inspect it.</section>;
+  }
+
   if (!manifest) {
     return <section className="card rounded-[28px] p-6">Manifest pending. Publish a repository to populate this record.</section>;
   }

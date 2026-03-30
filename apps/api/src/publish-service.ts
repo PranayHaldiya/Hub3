@@ -8,7 +8,7 @@ import type {
   SourceControlAdapter,
   StorageAdapter
 } from '@hub3/shared';
-import { makeDraftRepo, publishJobStore, repoStore, setPublishJobStatus, storeRepoFiles } from './data';
+import { makeDraftRepo, manifestStore, publishJobStore, repoStore, setPublishJobStatus, storeRepoFiles } from './data';
 
 async function extractReadableFiles(buffer: Buffer) {
   const zip = await JSZip.loadAsync(buffer);
@@ -124,10 +124,14 @@ export class PublishService {
       throw new Error(`Repo ${repoId} not found`);
     }
 
+    const existingManifest = repo.latestPublishedManifestId
+      ? await manifestStore.get(repo.latestPublishedManifestId)
+      : null;
+
     return this.publish(
       {
         sourceRepoFullName: repo.sourceRepoFullName,
-        walletAddress: 'Hub3Refresh111111111111111111111111111111',
+        walletAddress: existingManifest?.publisherWallet ?? 'Hub3Refresh111111111111111111111111111111',
         initiatedBy: 'agent'
       },
       accessToken

@@ -1,21 +1,25 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { GithubSession } from './auth';
 import { createGithubSession, createOauthState, consumeOauthState, getGithubSession } from './auth';
+import { beginPaidReadAccess, finalizePaidReadAccess } from './x402';
 import { config } from './config';
 import {
   githubCallbackResponseSchema,
   publishRepoRequestSchema,
   publishRepoResponseSchema,
+  repoAccessStatusResponseSchema,
   repoFileResponseSchema,
   repoManifestSchema,
   repoTreeResponseSchema,
   startGithubAuthResponseSchema,
+  updateRepoPricingRequestSchema,
+  updateRepoPricingResponseSchema,
   type OwnershipAdapter,
   type SourceControlAdapter,
   type StorageAdapter
 } from '@hub3/shared';
 import { createOwnershipAdapter, createSourceControlAdapter, createStorageAdapter } from './adapters';
-import { manifestStore, publishJobStore, repoFilesStore, repoStore } from './data';
+import { manifestStore, publishJobStore, repoAccessGrantStore, repoFilesStore, repoStore } from './data';
 import { PublishService } from './publish-service';
 
 export type RouteDependencies = {
@@ -31,6 +35,65 @@ async function requireSession(request: FastifyRequest): Promise<GithubSession> {
     throw new Error('GitHub session missing');
   }
   return session;
+}
+
+async function hasGithubWriteAccess(request: FastifyRequest, sourceControl: SourceControlAdapter, repoFullName: string) {
+  try {
+    const session = await requireSession(request);
+    const access = await sourceControl.getRepoAccess(session.accessToken, repoFullName);
+    return access.permissions.admin || access.permissions.push;
+  } catch {
+    return false;
+  }
+}
+
+async function hasRepoAccessGrant(request: FastifyRequest, repoId: string) {
+  const grantId = request.cookies[config.HUB3_REPO_ACCESS_COOKIE_NAME];
+  return Boolean(await repoAccessGrantStore.get(repoId, grantId));
+}
+
+async function getRepoAccessGrant(request: FastifyRequest, repoId: string) {
+  const grantId = request.cookies[config.HUB3_REPO_ACCESS_COOKIE_NAME];
+  return repoAccessGrantStore.get(repoId, grantId);
+}
+
+function serializeTimestamp(value: Date | string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+async function beginRepoContentAccess(input: {
+  request: FastifyRequest;
+  reply: FastifyReply;
+  repo: Awaited<ReturnType<typeof repoStore.get>>;
+  manifest: Awaited<ReturnType<typeof manifestStore.get>>;
+  sourceControl: SourceControlAdapter;
+  description: string;
+}) {
+  if (!input.repo || !input.manifest || !input.repo.pricing.active) {
+    return null;
+  }
+
+  if (await hasRepoAccessGrant(input.request, input.repo.id)) {
+    return null;
+  }
+
+  const canBypass = await hasGithubWriteAccess(input.request, input.sourceControl, input.repo.sourceRepoFullName);
+  if (canBypass) {
+    return null;
+  }
+
+  return beginPaidReadAccess({
+    request: input.request,
+    reply: input.reply,
+    repo: input.repo,
+    manifest: input.manifest,
+    description: input.description,
+    mimeType: 'application/json'
+  });
 }
 
 export async function registerRoutes(app: FastifyInstance, overrides: RouteDependencies = {}) {
@@ -136,6 +199,39 @@ export async function registerRoutes(app: FastifyInstance, overrides: RouteDepen
     }
   });
 
+  app.post('/repos/:repoId/pricing', async (request, reply) => {
+    try {
+      const session = await requireSession(request);
+      const params = request.params as { repoId: string };
+      const repo = await ownership.getRepo(params.repoId);
+      if (!repo) {
+        return reply.notFound(`Repo ${params.repoId} not found`);
+      }
+
+      const access = await sourceControl.getRepoAccess(session.accessToken, repo.sourceRepoFullName);
+      if (!(access.permissions.admin || access.permissions.push)) {
+        return reply.forbidden('GitHub write access is required to update pricing for this repository');
+      }
+
+      const pricing = updateRepoPricingRequestSchema.parse(request.body);
+      const { signature } = await ownership.setPricing(repo.id, pricing);
+      const updatedRepo = await ownership.getRepo(repo.id);
+      if (!updatedRepo) {
+        return reply.notFound(`Repo ${params.repoId} not found`);
+      }
+
+      return updateRepoPricingResponseSchema.parse({
+        repo: updatedRepo,
+        signature
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'GitHub session missing') {
+        return reply.unauthorized(error.message);
+      }
+      throw error;
+    }
+  });
+
   app.get('/repos/:repoId', async (request, reply) => {
     const params = request.params as { repoId: string };
     const repo = await repoStore.get(params.repoId);
@@ -143,6 +239,63 @@ export async function registerRoutes(app: FastifyInstance, overrides: RouteDepen
       return reply.notFound(`Repo ${params.repoId} not found`);
     }
     return repo;
+  });
+
+  app.get('/repos/:repoId/access', async (request, reply) => {
+    const params = request.params as { repoId: string };
+    const repo = await repoStore.get(params.repoId);
+    if (!repo) {
+      return reply.notFound(`Repo ${params.repoId} not found`);
+    }
+
+    const grant = await getRepoAccessGrant(request, repo.id);
+    const canBypass = await hasGithubWriteAccess(request, sourceControl, repo.sourceRepoFullName);
+
+    if (!repo.pricing.active) {
+      return repoAccessStatusResponseSchema.parse({
+        repoId: repo.id,
+        pricing: repo.pricing,
+        accessMode: 'public',
+        hasAccess: true,
+        requiresPayment: false,
+        expiresAt: null,
+        payerWallet: null
+      });
+    }
+
+    if (canBypass) {
+      return repoAccessStatusResponseSchema.parse({
+        repoId: repo.id,
+        pricing: repo.pricing,
+        accessMode: 'maintainer',
+        hasAccess: true,
+        requiresPayment: false,
+        expiresAt: null,
+        payerWallet: null
+      });
+    }
+
+    if (grant) {
+      return repoAccessStatusResponseSchema.parse({
+        repoId: repo.id,
+        pricing: repo.pricing,
+        accessMode: 'payment',
+        hasAccess: true,
+        requiresPayment: false,
+        expiresAt: serializeTimestamp(grant.expiresAt as Date | string | null),
+        payerWallet: grant.payerWallet
+      });
+    }
+
+    return repoAccessStatusResponseSchema.parse({
+      repoId: repo.id,
+      pricing: repo.pricing,
+      accessMode: 'locked',
+      hasAccess: false,
+      requiresPayment: true,
+      expiresAt: null,
+      payerWallet: null
+    });
   });
 
   app.get('/repos/:repoId/manifest', async (request, reply) => {
@@ -157,15 +310,60 @@ export async function registerRoutes(app: FastifyInstance, overrides: RouteDepen
       return reply.notFound(`Manifest for repo ${params.repoId} not found`);
     }
 
+    const access = await beginRepoContentAccess({
+      request,
+      reply,
+      repo,
+      manifest,
+      sourceControl,
+      description: `Manifest access for ${repo.sourceRepoFullName}`
+    });
+    if (reply.sent) {
+      return;
+    }
+
+    const settlement = await finalizePaidReadAccess({
+      reply,
+      access,
+      repoId: repo.id
+    });
+    if (settlement) {
+      return settlement;
+    }
+
     return repoManifestSchema.parse(manifest);
   });
 
   app.get('/repos/:repoId/tree', async (request, reply) => {
     const params = request.params as { repoId: string };
     const repo = await repoStore.get(params.repoId);
+    const manifest = repo?.latestPublishedManifestId
+      ? await manifestStore.get(repo.latestPublishedManifestId)
+      : null;
     const entries = await repoFilesStore.get(params.repoId);
     if (!repo?.latestPublishedManifestId || !entries) {
       return reply.notFound(`Tree for repo ${params.repoId} not found`);
+    }
+
+    const access = await beginRepoContentAccess({
+      request,
+      reply,
+      repo,
+      manifest,
+      sourceControl,
+      description: `Repository tree access for ${repo.sourceRepoFullName}`
+    });
+    if (reply.sent) {
+      return;
+    }
+
+    const settlement = await finalizePaidReadAccess({
+      reply,
+      access,
+      repoId: repo.id
+    });
+    if (settlement) {
+      return settlement;
     }
 
     return repoTreeResponseSchema.parse({
@@ -183,11 +381,35 @@ export async function registerRoutes(app: FastifyInstance, overrides: RouteDepen
     const params = request.params as { repoId: string };
     const query = request.query as { path?: string };
     const repo = await repoStore.get(params.repoId);
+    const manifest = repo?.latestPublishedManifestId
+      ? await manifestStore.get(repo.latestPublishedManifestId)
+      : null;
     const files = await repoFilesStore.get(params.repoId);
     const path = query.path ?? 'README.md';
 
     if (!repo?.latestPublishedManifestId || !files?.[path]) {
       return reply.notFound(`File ${path} for repo ${params.repoId} not found`);
+    }
+
+    const access = await beginRepoContentAccess({
+      request,
+      reply,
+      repo,
+      manifest,
+      sourceControl,
+      description: `Repository file access for ${repo.sourceRepoFullName}:${path}`
+    });
+    if (reply.sent) {
+      return;
+    }
+
+    const settlement = await finalizePaidReadAccess({
+      reply,
+      access,
+      repoId: repo.id
+    });
+    if (settlement) {
+      return settlement;
     }
 
     return repoFileResponseSchema.parse({

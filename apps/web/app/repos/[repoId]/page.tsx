@@ -1,11 +1,24 @@
-import { api } from '../../../lib/api';
-import { FileViewer } from '../../../features/repo-browser/components/file-viewer';
-import { TreePanel } from '../../../features/repo-browser/components/tree-panel';
-import { ManifestCard } from '../../../features/repo-details/components/manifest-card';
-import { RepoHeader } from '../../../features/repo-details/components/repo-header';
+import { ApiError, api } from '../../../lib/api';
+import { RepoContentShell } from '../../../features/repo-details/components/repo-content-shell';
 
 function decodeRepoId(raw: string) {
   return raw.includes('--') ? raw.replace('--', '/') : raw;
+}
+
+function toInitialLockedState<T>(error: unknown) {
+  if (error instanceof ApiError && error.status === 402) {
+    return {
+      data: null,
+      error: 'Locked behind x402 paid access.',
+      locked: true
+    };
+  }
+
+  return {
+    data: null,
+    error: error instanceof Error ? error.message : null,
+    locked: false
+  };
 }
 
 export default async function RepoDetailPage({ params }: { params: Promise<{ repoId: string }> }) {
@@ -14,20 +27,26 @@ export default async function RepoDetailPage({ params }: { params: Promise<{ rep
 
   try {
     const repo = await api.getRepo(fallbackRepoId);
-    const [manifest, tree, file] = await Promise.all([
-      api.getManifest(repo.id).catch(() => null),
-      api.getTree(repo.id).catch(() => null),
-      api.getFile(repo.id, 'README.md').catch(() => null)
+    const [manifestState, treeState, fileState] = await Promise.all([
+      api.getManifest(repo.id)
+        .then((data) => ({ data, error: null, locked: false }))
+        .catch((error) => toInitialLockedState(error)),
+      api.getTree(repo.id)
+        .then((data) => ({ data, error: null, locked: false }))
+        .catch((error) => toInitialLockedState(error)),
+      api.getFile(repo.id, 'README.md')
+        .then((data) => ({ data, error: null, locked: false }))
+        .catch((error) => toInitialLockedState(error))
     ]);
 
     return (
       <main className="mx-auto min-h-screen max-w-7xl space-y-6 px-6 py-10 md:px-10">
-        <RepoHeader repo={repo} manifest={manifest} />
-        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <ManifestCard manifest={manifest} />
-          <TreePanel tree={tree} />
-        </div>
-        <FileViewer file={file} />
+        <RepoContentShell
+          initialFile={fileState}
+          initialManifest={manifestState}
+          initialTree={treeState}
+          repo={repo}
+        />
       </main>
     );
   } catch {

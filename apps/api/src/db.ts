@@ -159,6 +159,7 @@ export async function clearDb() {
   await withTransaction(async (client) => {
     await client.query('DELETE FROM oauth_states');
     await client.query('DELETE FROM github_sessions');
+    await client.query('DELETE FROM repo_access_grants');
     await client.query('DELETE FROM publish_jobs');
     await client.query('DELETE FROM manifests');
     await client.query('DELETE FROM repo_files');

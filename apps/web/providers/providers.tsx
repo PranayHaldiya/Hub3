@@ -19,7 +19,14 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SolanaProvider client={solanaClient}>{children}</SolanaProvider>
+      <SolanaProvider
+        client={solanaClient}
+        walletPersistence={{
+          autoConnect: true
+        }}
+      >
+        {children}
+      </SolanaProvider>
     </QueryClientProvider>
   );
 }

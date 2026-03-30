@@ -5,6 +5,7 @@ import type {
   GithubUser,
   Hub3Repo,
   OwnershipAdapter,
+  RepoAccess,
   PublishJob,
   RepoManifest,
   SourceControlAdapter,
@@ -15,7 +16,7 @@ process.env.NODE_ENV = 'test';
 
 const { buildServer } = await import('./server');
 const { clearDb, closeDb } = await import('./db');
-const { manifestStore, repoStore } = await import('./data');
+const { manifestStore, repoAccessGrantStore, repoStore } = await import('./data');
 
 const fakeGithubUser: GithubUser = {
   id: 101,
@@ -25,6 +26,15 @@ const fakeGithubUser: GithubUser = {
 };
 
 class FakeSourceControlAdapter implements SourceControlAdapter {
+  constructor(private readonly access: RepoAccess = {
+    defaultBranch: 'main',
+    permissions: {
+      admin: true,
+      push: true,
+      pull: true
+    }
+  }) {}
+
   async getAuthorizationUrl(state: string) {
     return {
       authorizationUrl: `https://github.com/login/oauth/authorize?client_id=test&state=${state}`,
@@ -41,6 +51,10 @@ class FakeSourceControlAdapter implements SourceControlAdapter {
 
   async getCurrentUser() {
     return fakeGithubUser;
+  }
+
+  async getRepoAccess() {
+    return this.access;
   }
 
   async listPublicRepos(): Promise<GithubRepo[]> {
@@ -202,6 +216,311 @@ describe('Hub3 API', () => {
       url: `/repos/${payload.hub3RepoId}/tree`
     });
     expect(tree.statusCode).toBe(200);
+
+    await app.close();
+  }, 15_000);
+
+  it('updates repo pricing for a writer', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/auth/github/start'
+    });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'Hub3Wallet1111111111111111111111111111111',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    const pricing = await app.inject({
+      method: 'POST',
+      url: `/repos/${payload.hub3RepoId}/pricing`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        mode: 'fixed',
+        amount: '1500000000',
+        tokenMint: 'So11111111111111111111111111111111111111112',
+        active: true
+      }
+    });
+
+    expect(pricing.statusCode).toBe(200);
+    expect(pricing.json<{ repo: Hub3Repo }>().repo.pricing).toMatchObject({
+      mode: 'fixed',
+      amount: '1500000000',
+      active: true
+    });
+
+    await app.close();
+  }, 15_000);
+
+  it('rejects repo pricing updates without GitHub write access', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter({
+        defaultBranch: 'main',
+        permissions: {
+          admin: false,
+          push: false,
+          pull: true
+        }
+      }),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/auth/github/start'
+    });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'Hub3Wallet1111111111111111111111111111111',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    const pricing = await app.inject({
+      method: 'POST',
+      url: `/repos/${payload.hub3RepoId}/pricing`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        mode: 'fixed',
+        amount: '1500000000',
+        tokenMint: 'So11111111111111111111111111111111111111112',
+        active: true
+      }
+    });
+
+    expect(pricing.statusCode).toBe(403);
+
+    await app.close();
+  }, 15_000);
+
+  it('requires x402 payment headers for priced manifest reads', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/auth/github/start'
+    });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'So11111111111111111111111111111111111111112',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    await app.inject({
+      method: 'POST',
+      url: `/repos/${payload.hub3RepoId}/pricing`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        mode: 'fixed',
+        amount: '1500000000',
+        tokenMint: 'So11111111111111111111111111111111111111112',
+        active: true
+      }
+    });
+
+    const manifest = await app.inject({
+      method: 'GET',
+      url: `/repos/${payload.hub3RepoId}/manifest`,
+      headers: {
+        cookie: ''
+      }
+    });
+
+    expect(manifest.statusCode).toBe(402);
+    expect(manifest.headers['payment-required']).toBeTruthy();
+
+    await app.close();
+  }, 15_000);
+
+  it('allows priced manifest reads with a repo access grant cookie', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/auth/github/start'
+    });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'So11111111111111111111111111111111111111112',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    await app.inject({
+      method: 'POST',
+      url: `/repos/${payload.hub3RepoId}/pricing`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        mode: 'fixed',
+        amount: '1500000000',
+        tokenMint: 'So11111111111111111111111111111111111111112',
+        active: true
+      }
+    });
+
+    const grant = await repoAccessGrantStore.create(payload.hub3RepoId, 'Payer11111111111111111111111111111111111');
+    const manifest = await app.inject({
+      method: 'GET',
+      url: `/repos/${payload.hub3RepoId}/manifest`,
+      headers: {
+        cookie: `hub3_repo_access=${grant.grantId}`
+      }
+    });
+
+    expect(manifest.statusCode).toBe(200);
+
+    await app.close();
+  }, 15_000);
+
+  it('reports payment access status for an active repo access grant', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/auth/github/start'
+    });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'So11111111111111111111111111111111111111112',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    await app.inject({
+      method: 'POST',
+      url: `/repos/${payload.hub3RepoId}/pricing`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        mode: 'fixed',
+        amount: '1500000000',
+        tokenMint: 'So11111111111111111111111111111111111111112',
+        active: true
+      }
+    });
+
+    const grant = await repoAccessGrantStore.create(payload.hub3RepoId, 'Payer11111111111111111111111111111111111');
+    const access = await app.inject({
+      method: 'GET',
+      url: `/repos/${payload.hub3RepoId}/access`,
+      headers: {
+        cookie: `hub3_repo_access=${grant.grantId}`
+      }
+    });
+
+    expect(access.statusCode).toBe(200);
+    expect(access.json<{ accessMode: string; hasAccess: boolean; payerWallet: string | null }>())
+      .toMatchObject({
+        accessMode: 'payment',
+        hasAccess: true,
+        payerWallet: 'Payer11111111111111111111111111111111111'
+      });
 
     await app.close();
   }, 15_000);

@@ -20,6 +20,15 @@ export const pricingConfigSchema = z.object({
   active: z.boolean().default(false)
 });
 
+export const repoAccessSchema = z.object({
+  defaultBranch: z.string(),
+  permissions: z.object({
+    admin: z.boolean(),
+    push: z.boolean(),
+    pull: z.boolean()
+  })
+});
+
 export const repoManifestSchema = z.object({
   hub3RepoId: z.string(),
   sourceProvider: sourceProviderSchema,
@@ -109,6 +118,25 @@ export const publishRepoResponseSchema = z.object({
   status: publishJobStatusSchema
 });
 
+export const updateRepoPricingRequestSchema = pricingConfigSchema;
+
+export const updateRepoPricingResponseSchema = z.object({
+  repo: hub3RepoSchema,
+  signature: z.string()
+});
+
+export const repoAccessModeSchema = z.enum(['public', 'maintainer', 'payment', 'locked']);
+
+export const repoAccessStatusResponseSchema = z.object({
+  repoId: z.string(),
+  pricing: pricingConfigSchema,
+  accessMode: repoAccessModeSchema,
+  hasAccess: z.boolean(),
+  requiresPayment: z.boolean(),
+  expiresAt: z.string().nullable(),
+  payerWallet: z.string().nullable()
+});
+
 export const repoTreeEntrySchema = z.object({
   path: z.string(),
   type: z.enum(["file", "directory"]),
@@ -134,6 +162,7 @@ export type PublishMode = z.infer<typeof publishModeSchema>;
 export type RepoStatus = z.infer<typeof repoStatusSchema>;
 export type PublishJobStatus = z.infer<typeof publishJobStatusSchema>;
 export type PricingConfig = z.infer<typeof pricingConfigSchema>;
+export type RepoAccess = z.infer<typeof repoAccessSchema>;
 export type RepoManifest = z.infer<typeof repoManifestSchema>;
 export type Hub3Repo = z.infer<typeof hub3RepoSchema>;
 export type PublishJob = z.infer<typeof publishJobSchema>;
@@ -143,5 +172,9 @@ export type StartGithubAuthResponse = z.infer<typeof startGithubAuthResponseSche
 export type GithubCallbackResponse = z.infer<typeof githubCallbackResponseSchema>;
 export type PublishRepoRequest = z.infer<typeof publishRepoRequestSchema>;
 export type PublishRepoResponse = z.infer<typeof publishRepoResponseSchema>;
+export type UpdateRepoPricingRequest = z.infer<typeof updateRepoPricingRequestSchema>;
+export type UpdateRepoPricingResponse = z.infer<typeof updateRepoPricingResponseSchema>;
+export type RepoAccessMode = z.infer<typeof repoAccessModeSchema>;
+export type RepoAccessStatusResponse = z.infer<typeof repoAccessStatusResponseSchema>;
 export type RepoTreeResponse = z.infer<typeof repoTreeResponseSchema>;
 export type RepoFileResponse = z.infer<typeof repoFileResponseSchema>;

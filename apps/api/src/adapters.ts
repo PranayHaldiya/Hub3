@@ -14,6 +14,7 @@ import type {
   OwnershipAdapter,
   PricingConfig,
   PublishJob,
+  RepoAccess,
   RepoManifest,
   SourceControlAdapter,
   StorageAdapter
@@ -157,6 +158,26 @@ export class GitHubSourceControlAdapter implements SourceControlAdapter {
     };
   }
 
+  async getRepoAccess(accessToken: string, fullName: string): Promise<RepoAccess> {
+    const repo = await readGithubJson<{
+      default_branch: string;
+      permissions?: {
+        admin?: boolean;
+        push?: boolean;
+        pull?: boolean;
+      };
+    }>(`/repos/${fullName}`, accessToken);
+
+    return {
+      defaultBranch: repo.default_branch,
+      permissions: {
+        admin: !!repo.permissions?.admin,
+        push: !!repo.permissions?.push,
+        pull: repo.permissions?.pull ?? true
+      }
+    };
+  }
+
   async listPublicRepos(accessToken: string): Promise<GithubRepo[]> {
     const repos = await readGithubJson<Array<{
       id: number;
@@ -169,19 +190,30 @@ export class GitHubSourceControlAdapter implements SourceControlAdapter {
       updated_at: string;
     }>>('/user/repos?visibility=public&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100', accessToken);
 
-    return repos
-      .filter((repo) => !repo.private)
-      .map((repo) => ({
-        id: repo.id,
-        name: repo.name,
-        fullName: repo.full_name,
-        description: repo.description,
-        defaultBranch: repo.default_branch,
-        headSha: '',
-        isPrivate: repo.private,
-        htmlUrl: repo.html_url,
-        updatedAt: repo.updated_at
-      }));
+    const publicRepos = repos.filter((repo) => !repo.private);
+    const heads = await Promise.all(
+      publicRepos.map(async (repo) => {
+        try {
+          const commit = await readGithubJson<{ sha: string }>(`/repos/${repo.full_name}/commits/${repo.default_branch}`, accessToken);
+          return [repo.full_name, commit.sha] as const;
+        } catch {
+          return [repo.full_name, ''] as const;
+        }
+      })
+    );
+    const headShas = new Map(heads);
+
+    return publicRepos.map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      fullName: repo.full_name,
+      description: repo.description,
+      defaultBranch: repo.default_branch,
+      headSha: headShas.get(repo.full_name) ?? '',
+      isPrivate: repo.private,
+      htmlUrl: repo.html_url,
+      updatedAt: repo.updated_at
+    }));
   }
 
   async resolveRepoRef(accessToken: string, fullName: string, ref?: string) {
