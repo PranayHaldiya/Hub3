@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import { deriveHub3RepoId } from '@hub3/shared';
 import type {
+  Hub3AgentActivity,
+  Hub3AgentPolicy,
+  Hub3AgentPolicyInput,
+  Hub3AgentWallet,
+  Hub3PaymentReceipt,
   Hub3Repo,
   PricingConfig,
   PublishJob,
@@ -18,6 +23,38 @@ const defaultPricing: PricingConfig = {
   tokenMint: 'So11111111111111111111111111111111111111112',
   active: false
 };
+
+function defaultAgentWallet(ownerId: string): Hub3AgentWallet {
+  const timestamp = now();
+  return {
+    ownerId,
+    status: 'not_configured',
+    walletAddress: null,
+    vaultId: null,
+    signerUrl: config.HUB3_SIGNER_URL ?? null,
+    lastError: null,
+    lastSyncedAt: null,
+    metadata: {},
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function defaultAgentPolicy(ownerId: string): Hub3AgentPolicy {
+  const timestamp = now();
+  return {
+    ownerId,
+    active: true,
+    allowedActions: ['unlock', 'publish', 'refresh'],
+    allowedRepoPatterns: [],
+    maxSpendPerTransaction: '1000000000',
+    dailySpendLimit: '5000000000',
+    requireApprovalAbove: '500000000',
+    notes: 'Default hackathon policy. Restrict this before enabling autonomous actions.',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
 
 function createJsonStore<T>(table: string, keyColumn: string, valueColumn: string) {
   return {
@@ -40,9 +77,140 @@ function createJsonStore<T>(table: string, keyColumn: string, valueColumn: strin
   };
 }
 
-export const repoStore = createJsonStore<Hub3Repo>('repos', 'id', 'repo_json');
+const rawRepoStore = createJsonStore<Hub3Repo>('repos', 'id', 'repo_json');
+
+export const repoStore = {
+  async get(id: string) {
+    return rawRepoStore.get(id);
+  },
+  async set(id: string, value: Hub3Repo) {
+    await rawRepoStore.set(id, value);
+    return this;
+  },
+  async list() {
+    const result = await query<{ repo: Hub3Repo | string }>('SELECT repo_json AS repo FROM repos ORDER BY id ASC');
+    return result.rows.map((row) => parseJson<Hub3Repo>(row.repo));
+  }
+};
 export const manifestStore = createJsonStore<RepoManifest>('manifests', 'id', 'manifest_json');
 export const publishJobStore = createJsonStore<PublishJob>('publish_jobs', 'id', 'job_json');
+const rawAgentWalletStore = createJsonStore<Hub3AgentWallet>('agent_wallets', 'owner_id', 'wallet_json');
+const rawAgentPolicyStore = createJsonStore<Hub3AgentPolicy>('agent_policies', 'owner_id', 'policy_json');
+
+export const agentWalletSecretStore = {
+  async get(ownerId: string) {
+    const result = await query<{ mnemonic: string }>('SELECT mnemonic FROM agent_wallet_secrets WHERE owner_id = $1', [ownerId]);
+    return result.rows[0]?.mnemonic ?? null;
+  },
+  async set(ownerId: string, mnemonic: string) {
+    await query(
+      'INSERT INTO agent_wallet_secrets (owner_id, mnemonic, updated_at) VALUES ($1, $2, $3) ON CONFLICT(owner_id) DO UPDATE SET mnemonic = excluded.mnemonic, updated_at = excluded.updated_at',
+      [ownerId, mnemonic, now()]
+    );
+    return mnemonic;
+  }
+};
+
+export const agentWalletStore = {
+  async get(ownerId: string) {
+    return (await rawAgentWalletStore.get(ownerId)) ?? defaultAgentWallet(ownerId);
+  },
+  async set(ownerId: string, wallet: Hub3AgentWallet) {
+    await rawAgentWalletStore.set(ownerId, {
+      ...wallet,
+      ownerId,
+      updatedAt: now(),
+      signerUrl: wallet.signerUrl ?? config.HUB3_SIGNER_URL ?? null
+    });
+    return this.get(ownerId);
+  }
+};
+
+export const agentPolicyStore = {
+  async get(ownerId: string) {
+    return (await rawAgentPolicyStore.get(ownerId)) ?? defaultAgentPolicy(ownerId);
+  },
+  async set(ownerId: string, policy: Hub3AgentPolicyInput) {
+    const current = await this.get(ownerId);
+    const next: Hub3AgentPolicy = {
+      ...current,
+      ...policy,
+      ownerId,
+      updatedAt: now()
+    };
+    await rawAgentPolicyStore.set(ownerId, next);
+    return next;
+  }
+};
+
+export const agentActivityStore = {
+  async list(ownerId: string, limit = 10) {
+    const result = await query<{ activity: Hub3AgentActivity | string }>(
+      `
+        SELECT activity_json AS activity
+        FROM agent_activity_logs
+        WHERE owner_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [ownerId, limit]
+    );
+
+    return result.rows.map((row) => parseJson<Hub3AgentActivity>(row.activity));
+  },
+  async log(entry: Omit<Hub3AgentActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) {
+    const activity: Hub3AgentActivity = {
+      ...entry,
+      id: entry.id ?? crypto.randomUUID(),
+      createdAt: entry.createdAt ?? now()
+    };
+
+    await query(
+      `
+        INSERT INTO agent_activity_logs (id, owner_id, created_at, activity_json)
+        VALUES ($1, $2, $3, $4::jsonb)
+      `,
+      [activity.id, activity.ownerId, activity.createdAt, stringifyJson(activity)]
+    );
+
+    return activity;
+  }
+};
+
+export const paymentReceiptStore = {
+  async list(ownerId: string, limit = 10) {
+    const result = await query<{ receipt: Hub3PaymentReceipt | string }>(
+      `
+        SELECT receipt_json AS receipt
+        FROM payment_receipts
+        WHERE owner_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [ownerId, limit]
+    );
+
+    return result.rows.map((row) => parseJson<Hub3PaymentReceipt>(row.receipt));
+  },
+  async record(receipt: Omit<Hub3PaymentReceipt, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) {
+    const next: Hub3PaymentReceipt = {
+      ...receipt,
+      id: receipt.id ?? crypto.randomUUID(),
+      createdAt: receipt.createdAt ?? now()
+    };
+
+    await query(
+      `
+        INSERT INTO payment_receipts (id, owner_id, created_at, receipt_json)
+        VALUES ($1, $2, $3, $4::jsonb)
+      `,
+      [next.id, next.ownerId, next.createdAt, stringifyJson(next)]
+    );
+
+    return next;
+  }
+};
+
 export type RepoAccessGrant = {
   grantId: string;
   repoId: string;
@@ -177,3 +345,4 @@ export async function makeDraftRepo(fullName: string, commitSha: string): Promis
   await repoStore.set(id, repo);
   return repo;
 }
+

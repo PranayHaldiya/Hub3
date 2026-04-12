@@ -125,7 +125,90 @@ export const updateRepoPricingResponseSchema = z.object({
   signature: z.string()
 });
 
-export const repoAccessModeSchema = z.enum(['public', 'maintainer', 'payment', 'locked']);
+export const hub3AgentWalletStatusSchema = z.enum(["not_configured", "provisioning", "active", "error"]);
+export const hub3AgentActionTypeSchema = z.enum(["unlock", "publish", "refresh", "set_pricing", "configure_policy", "approve"]);
+export const hub3AgentActionStatusSchema = z.enum(["requested", "approved", "blocked", "completed", "failed"]);
+
+export const hub3AgentWalletSchema = z.object({
+  ownerId: z.string(),
+  status: hub3AgentWalletStatusSchema,
+  walletAddress: z.string().nullable(),
+  vaultId: z.string().nullable(),
+  signerUrl: z.string().nullable(),
+  lastError: z.string().nullable(),
+  lastSyncedAt: z.string().nullable(),
+  metadata: z.record(z.unknown()).default({}),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const hub3AgentPolicyInputSchema = z.object({
+  active: z.boolean().default(true),
+  allowedActions: z.array(hub3AgentActionTypeSchema).min(1),
+  allowedRepoPatterns: z.array(z.string()).default([]),
+  maxSpendPerTransaction: z.string().regex(/^\d+$/),
+  dailySpendLimit: z.string().regex(/^\d+$/),
+  requireApprovalAbove: z.string().regex(/^\d+$/),
+  notes: z.string().nullable().default(null)
+});
+
+export const hub3AgentPolicySchema = hub3AgentPolicyInputSchema.extend({
+  ownerId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const hub3AgentActivitySchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  repoId: z.string().nullable(),
+  actionType: hub3AgentActionTypeSchema,
+  status: hub3AgentActionStatusSchema,
+  actor: z.enum(["user", "agent", "system"]),
+  title: z.string(),
+  detail: z.string().nullable(),
+  amount: z.string().nullable(),
+  tokenMint: z.string().nullable(),
+  transactionSignature: z.string().nullable(),
+  createdAt: z.string()
+});
+
+export const hub3PaymentReceiptSchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  repoId: z.string().nullable(),
+  resource: z.enum(["repo_access", "publish", "refresh"]),
+  amount: z.string(),
+  tokenMint: z.string(),
+  payerWallet: z.string().nullable(),
+  transactionSignature: z.string().nullable(),
+  createdAt: z.string()
+});
+
+export const hub3AgentRefreshCheckSchema = z.object({
+  repoId: z.string(),
+  repoFullName: z.string(),
+  allowed: z.boolean(),
+  reason: z.string().nullable(),
+  walletReady: z.boolean(),
+  policyActive: z.boolean(),
+  actionEnabled: z.boolean(),
+  matchedPattern: z.string().nullable()
+});
+
+export const hub3AgentRefreshRunResponseSchema = hub3AgentRefreshCheckSchema.extend({
+  status: hub3AgentActionStatusSchema,
+  job: publishRepoResponseSchema.nullable()
+});
+
+export const hub3DashboardSummaryResponseSchema = z.object({
+  wallet: hub3AgentWalletSchema,
+  policy: hub3AgentPolicySchema,
+  recentActivity: z.array(hub3AgentActivitySchema),
+  recentReceipts: z.array(hub3PaymentReceiptSchema)
+});
+
+export const repoAccessModeSchema = z.enum(["public", "maintainer", "payment", "locked"]);
 
 export const repoAccessStatusResponseSchema = z.object({
   repoId: z.string(),
@@ -174,7 +257,19 @@ export type PublishRepoRequest = z.infer<typeof publishRepoRequestSchema>;
 export type PublishRepoResponse = z.infer<typeof publishRepoResponseSchema>;
 export type UpdateRepoPricingRequest = z.infer<typeof updateRepoPricingRequestSchema>;
 export type UpdateRepoPricingResponse = z.infer<typeof updateRepoPricingResponseSchema>;
+export type Hub3AgentWalletStatus = z.infer<typeof hub3AgentWalletStatusSchema>;
+export type Hub3AgentActionType = z.infer<typeof hub3AgentActionTypeSchema>;
+export type Hub3AgentActionStatus = z.infer<typeof hub3AgentActionStatusSchema>;
+export type Hub3AgentWallet = z.infer<typeof hub3AgentWalletSchema>;
+export type Hub3AgentPolicyInput = z.infer<typeof hub3AgentPolicyInputSchema>;
+export type Hub3AgentPolicy = z.infer<typeof hub3AgentPolicySchema>;
+export type Hub3AgentActivity = z.infer<typeof hub3AgentActivitySchema>;
+export type Hub3PaymentReceipt = z.infer<typeof hub3PaymentReceiptSchema>;
+export type Hub3AgentRefreshCheck = z.infer<typeof hub3AgentRefreshCheckSchema>;
+export type Hub3AgentRefreshRunResponse = z.infer<typeof hub3AgentRefreshRunResponseSchema>;
+export type Hub3DashboardSummaryResponse = z.infer<typeof hub3DashboardSummaryResponseSchema>;
 export type RepoAccessMode = z.infer<typeof repoAccessModeSchema>;
 export type RepoAccessStatusResponse = z.infer<typeof repoAccessStatusResponseSchema>;
 export type RepoTreeResponse = z.infer<typeof repoTreeResponseSchema>;
 export type RepoFileResponse = z.infer<typeof repoFileResponseSchema>;
+

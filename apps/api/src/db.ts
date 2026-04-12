@@ -159,6 +159,11 @@ export async function clearDb() {
   await withTransaction(async (client) => {
     await client.query('DELETE FROM oauth_states');
     await client.query('DELETE FROM github_sessions');
+    await client.query('DELETE FROM payment_receipts');
+    await client.query('DELETE FROM agent_activity_logs');
+    await client.query('DELETE FROM agent_policies');
+    await client.query('DELETE FROM agent_wallet_secrets');
+    await client.query('DELETE FROM agent_wallets');
     await client.query('DELETE FROM repo_access_grants');
     await client.query('DELETE FROM publish_jobs');
     await client.query('DELETE FROM manifests');
@@ -166,3 +171,5 @@ export async function clearDb() {
     await client.query('DELETE FROM repos');
   });
 }
+
+

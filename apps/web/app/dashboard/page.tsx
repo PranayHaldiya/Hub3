@@ -6,7 +6,7 @@ export default function DashboardPage() {
       <section className="mb-8 flex items-end justify-between gap-6">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Dashboard</p>
-          <h1 className="display mt-3 text-5xl text-stone-900">Select a repository and publish it into Hub3.</h1>
+          <h1 className="display mt-3 text-5xl text-stone-900">Manage repos, wallet policy, and the first Hub3 agent controls.</h1>
         </div>
       </section>
       <DashboardClient />

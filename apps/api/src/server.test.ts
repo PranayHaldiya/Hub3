@@ -5,8 +5,8 @@ import type {
   GithubUser,
   Hub3Repo,
   OwnershipAdapter,
-  RepoAccess,
   PublishJob,
+  RepoAccess,
   RepoManifest,
   SourceControlAdapter,
   StorageAdapter
@@ -16,7 +16,7 @@ process.env.NODE_ENV = 'test';
 
 const { buildServer } = await import('./server');
 const { clearDb, closeDb } = await import('./db');
-const { manifestStore, repoAccessGrantStore, repoStore } = await import('./data');
+const { agentWalletStore, manifestStore, repoAccessGrantStore, repoStore } = await import('./data');
 
 const fakeGithubUser: GithubUser = {
   id: 101,
@@ -515,12 +515,136 @@ describe('Hub3 API', () => {
     });
 
     expect(access.statusCode).toBe(200);
-    expect(access.json<{ accessMode: string; hasAccess: boolean; payerWallet: string | null }>())
-      .toMatchObject({
-        accessMode: 'payment',
-        hasAccess: true,
-        payerWallet: 'Payer11111111111111111111111111111111111'
-      });
+    expect(access.json<{ accessMode: string; hasAccess: boolean; payerWallet: string | null }>()).toMatchObject({
+      accessMode: 'payment',
+      hasAccess: true,
+      payerWallet: 'Payer11111111111111111111111111111111111'
+    });
+
+    await app.close();
+  }, 15_000);
+
+  it('blocks agent refresh until the OWS wallet is provisioned', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({ method: 'POST', url: '/auth/github/start' });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'Hub3Wallet1111111111111111111111111111111',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    const check = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/refresh/${payload.hub3RepoId}/check`,
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      }
+    });
+
+    expect(check.statusCode).toBe(200);
+    expect(check.json<{ allowed: boolean; reason: string | null }>()).toMatchObject({
+      allowed: false,
+      reason: 'Provision the Hub3 OWS wallet before running agent refresh.'
+    });
+
+    const refresh = await app.inject({
+      method: 'POST',
+      url: '/agent/actions/refresh',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        repoId: payload.hub3RepoId
+      }
+    });
+
+    expect(refresh.statusCode).toBe(403);
+
+    await app.close();
+  }, 15_000);
+
+  it('runs agent refresh when wallet and policy allow it', async () => {
+    const app = await buildServer({
+      sourceControl: new FakeSourceControlAdapter(),
+      storage: new FakeStorageAdapter(),
+      ownership: new FakeOwnershipAdapter()
+    });
+
+    const start = await app.inject({ method: 'POST', url: '/auth/github/start' });
+    const state = start.json<{ state: string }>().state;
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/github/callback?code=test-code&state=${state}`
+    });
+    const cookie = callback.cookies[0]?.value;
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/repos/publish',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        sourceRepoFullName: 'hub3-labs/hub3-demo',
+        walletAddress: 'Hub3Wallet1111111111111111111111111111111',
+        initiatedBy: 'user'
+      }
+    });
+
+    const payload = publish.json<{ hub3RepoId: string }>();
+    const currentWallet = await agentWalletStore.get(fakeGithubUser.login);
+    await agentWalletStore.set(fakeGithubUser.login, {
+      ...currentWallet,
+      ownerId: fakeGithubUser.login,
+      status: 'active',
+      walletAddress: 'So11111111111111111111111111111111111111112',
+      vaultId: 'hub3:hub3-builder',
+      signerUrl: 'http://signer.test',
+      lastError: null,
+      lastSyncedAt: new Date().toISOString()
+    });
+
+    const refresh = await app.inject({
+      method: 'POST',
+      url: '/agent/actions/refresh',
+      headers: {
+        cookie: `hub3_session=${cookie}`
+      },
+      payload: {
+        repoId: payload.hub3RepoId
+      }
+    });
+
+    expect(refresh.statusCode).toBe(200);
+    expect(refresh.json<{ status: string; allowed: boolean; job: { hub3RepoId: string } }>()).toMatchObject({
+      status: 'completed',
+      allowed: true,
+      job: {
+        hub3RepoId: payload.hub3RepoId
+      }
+    });
 
     await app.close();
   }, 15_000);

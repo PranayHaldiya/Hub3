@@ -1,6 +1,14 @@
 import type {
   GithubRepo,
   GithubUser,
+  Hub3AgentActivity,
+  Hub3AgentPolicy,
+  Hub3AgentPolicyInput,
+  Hub3AgentRefreshCheck,
+  Hub3AgentRefreshRunResponse,
+  Hub3AgentWallet,
+  Hub3DashboardSummaryResponse,
+  Hub3PaymentReceipt,
   Hub3Repo,
   PricingConfig,
   PublishJob,
@@ -56,6 +64,22 @@ export const api = {
   startGithubAuth: () => request<StartGithubAuthResponse>('/auth/github/start', { method: 'POST' }),
   getGithubMe: () => request<GithubUser>('/github/me'),
   listGithubRepos: () => request<GithubRepo[]>('/github/repos'),
+  listHub3Repos: () => request<Hub3Repo[]>('/repos/mine'),
+  getDashboardSummary: () => request<Hub3DashboardSummaryResponse>('/dashboard/summary'),
+  getAgentWallet: () => request<Hub3AgentWallet>('/agent/wallet'),
+  provisionAgentWallet: () => request<Hub3AgentWallet>('/agent/wallet/provision', { method: 'POST' }),
+  getAgentPolicy: () => request<Hub3AgentPolicy>('/agent/policy'),
+  updateAgentPolicy: (body: Hub3AgentPolicyInput) => request<Hub3AgentPolicy>('/agent/policy', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  }),
+  getAgentActivity: (limit?: number) => request<Hub3AgentActivity[]>(`/agent/activity${limit ? `?limit=${limit}` : ''}`),
+  getAgentReceipts: (limit?: number) => request<Hub3PaymentReceipt[]>(`/agent/receipts${limit ? `?limit=${limit}` : ''}`),
+  checkAgentRefresh: (repoId: string) => request<Hub3AgentRefreshCheck>(`/agent/actions/refresh/${repoId}/check`),
+  runAgentRefresh: (repoId: string) => request<Hub3AgentRefreshRunResponse>('/agent/actions/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ repoId })
+  }),
   publishRepo: (body: PublishRepoRequest) => request<PublishRepoResponse>('/repos/publish', {
     method: 'POST',
     body: JSON.stringify(body)

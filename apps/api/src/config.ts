@@ -61,6 +61,8 @@ const envSchema = z.object({
   NODE_ENV: z.string().optional(),
   HUB3_API_URL: z.string().url().default('http://localhost:4000'),
   HUB3_WEB_URL: z.string().url().default('http://localhost:3000'),
+  HUB3_SIGNER_URL: optionalUrl,
+  HUB3_SIGNER_SECRET: optionalString,
   HUB3_SESSION_COOKIE_NAME: z.string().default('hub3_session'),
   HUB3_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
   HUB3_REPO_ACCESS_COOKIE_NAME: z.string().default('hub3_repo_access'),
@@ -108,5 +110,8 @@ export const config = {
   hasGithubConfig: Boolean(parsed.GITHUB_CLIENT_ID && parsed.GITHUB_CLIENT_SECRET),
   hasDatabaseConfig: parsed.NODE_ENV === 'test' ? true : Boolean(parsed.DATABASE_URL),
   hasIrysConfig: Boolean(parsed.IRYS_PRIVATE_KEY && irysRpcUrl),
-  hasOwnershipConfig: Boolean(parsed.SOLANA_RPC_URL && parsed.SOLANA_PRIVATE_KEY && parsed.REPO_REGISTRY_PROGRAM_ID)
+  hasOwnershipConfig: Boolean(parsed.SOLANA_RPC_URL && parsed.SOLANA_PRIVATE_KEY && parsed.REPO_REGISTRY_PROGRAM_ID),
+  hasSignerConfig: Boolean(parsed.HUB3_SIGNER_URL && parsed.HUB3_SIGNER_SECRET)
 };
+
+
